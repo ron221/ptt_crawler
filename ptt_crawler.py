@@ -6,13 +6,18 @@ from bs4 import BeautifulSoup
 from conn_info import connect_db
 
 PTT_URL = 'https://www.ptt.cc'
-BOARD = ['NSwitch']
+# Add the board you want to crawl in BOARD
+BOARD = ['NBA']
+
+# Edit the start and end date of articles 
 start_date = '20200406'
-end_date = '20200406'
+end_date = '20200407'
 
 def get_web_page(url):
 	try:
-		res = requests.get(url)
+		# some boards restrict the audience age need to be over 18
+		cookies = dict(over18='1')
+		res = requests.get(url, cookies=cookies)
 		# sucessful response
 		if res.status_code == 200:
 			return res.text
@@ -46,9 +51,13 @@ def get_articles(dom, start_date, end_date, conn):
 				except TypeError:
 					print('Wrong format on this page:', href)
 					continue
-				save_article(article, conn)
-				save_push(article['push'], conn)
-				articles.append(article)
+				if article == None:
+					print('Wrong format on this page:', href)
+					continue
+				else:
+					save_article(article, conn)
+					save_push(article['push'], conn)
+					articles.append(article)
 	return articles, prev_url
 	
 
@@ -56,56 +65,71 @@ def get_articles(dom, start_date, end_date, conn):
 ## authorId, authorName, category, title, publishedTime, content, canonicalUrl, 
 ## createdTime, commentId, commentContent, commentTime
 def get_content(url):
-	res = requests.get(url)
+	cookies = dict(over18='1')
+	res = requests.get(url, cookies=cookies)
 	soup = BeautifulSoup(res.text, 'lxml')
 
 	# get article content
 	span = soup.find_all('span', 'article-meta-value')
-	author_id = span[0].text.strip().split('(')[0]
-	author_name = span[0].text.strip().split('(')[1].replace(')', '')
+	if span == []:
+		return None
+	else:
+		author_id = span[0].text.strip().split('(')[0]
+		author_name = span[0].text.strip().split('(')[1].replace(')', '')
+		
+		
+		title = span[2].text.strip()
+		
+		# time, datetime
+		try:
+			# Use span[-1] because in some case the board name is not exist in the span
+			time = span[-1].text.strip()
+			dt = datetime.strptime(time, '%a %b %d %H:%M:%S %Y')
+
+		except IndexError:
+			time = None
+		# content
+		end_at = u'--'
+		main_content = soup.find(id='main-content').text.strip()
+		content = main_content.split(time)[1].split(end_at)[0]
+
+		# push (author, content, time)
+		pushes = soup.find_all('div', 'push')
+		push_list = []
+		current_year = datetime.now().strftime('%Y')
+		for push in pushes:
+			push_author = push.find('span', 'f3 hl push-userid').text
+			push_content = push.find('span', 'f3 push-content').text.lstrip(': ')
+
+			
+			try:
+				push_time = current_year + '/' + push.find('span', 'push-ipdatetime').text.strip()
+				push_time = datetime.strptime(push_time, '%Y/%m/%d %H:%M')
+			except ValueError:
+				# print(url)
+				push_time = 'Not found.'
+				continue
+			
+			push_list.append({
+				'push_author': push_author,
+				'push_content': push_content,
+				'push_time': push_time
+			})
+		article = {
+			'title': title,
+			'author_id': author_id,
+			'author_name': author_name,
+			# 'category': category,
+			'time': dt,
+			'content': content, 
+			'url': url,
+			'push': push_list
+		}
+		return article
+
+
 	
-	# print(span[2].text)
-	title = span[2].text.strip()
 	
-	# time, datetime
-	time = span[3].text.strip()
-	dt = datetime.strptime(time, '%a %b %d %H:%M:%S %Y')
-
-	# content
-	end_at = u'--'
-	main_content = soup.find(id='main-content').text.strip()
-	content = main_content.split(time)[1].split(end_at)[0]
-
-	# push (author, content, time)
-	pushes = soup.find_all('div', 'push')
-	push_list = []
-	current_year = datetime.now().strftime('%Y')
-	for push in pushes:
-		push_author = push.find('span', 'f3 hl push-userid').text
-		push_content = push.find('span', 'f3 push-content').text.lstrip(': ')
-		if push.find('span', 'push-ipdatetime').text.strip():
-			push_time = current_year + '/' + push.find('span', 'push-ipdatetime').text.strip()
-			push_time = datetime.strptime(push_time, '%Y/%m/%d %H:%M')
-		else:
-			print('Time', push.find('span', 'push-ipdatetime').text.strip())
-			push_time = None
-		push_list.append({
-			'push_author': push_author,
-			'push_content': push_content,
-			'push_time': push_time
-		})
-	article = {
-		'title': title,
-		'author_id': author_id,
-		'author_name': author_name,
-		# 'category': category,
-		'time': dt,
-		'content': content, 
-		'url': url,
-		'push': push_list
-	}
-	return article
-
 def save_article(article, conn):
 	cur = conn.cursor()
 	cur.execute('''INSERT INTO article (
