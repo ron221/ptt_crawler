@@ -48,16 +48,17 @@ def get_articles(dom, start_date, end_date, conn):
 				href = PTT_URL + d.find('a')['href']
 				try:
 					article = get_content(href)
-				except TypeError:
-					print('Wrong format on this page:', href)
-					continue
-				if article == None:
-					print('Wrong format on this page:', href)
-					continue
-				else:
 					save_article(article, conn)
 					save_push(article['push'], conn)
 					articles.append(article)
+				except TypeError:
+					print('Wrong format on this page:', href)
+					continue
+				# if article == None:
+				# 	print('Wrong format on this page:', href)
+				# 	continue
+				# else:
+					
 	return articles, prev_url
 	
 
